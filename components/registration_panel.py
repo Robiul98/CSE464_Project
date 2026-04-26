@@ -136,6 +136,48 @@ def _all_offered_sections(semester_id: int) -> list[dict]:
 # Enroll / Drop actions
 # ─────────────────────────────────────────────────────────────────────────────
 
+# def _do_enroll(student_id: str, section_id: int, actor_id: str,
+#                acting_role: str, course_code: str, section_name: str):
+#     """Insert registration_request + enrollment, decrement seats, log provenance."""
+    
+#     # --- FIX: Prevent double-enrollment and double seat decrement ---
+#     existing = fetch_one(
+#         "SELECT enrollment_id FROM enrollments WHERE students_id = :sid AND section_id = :sec AND enrollment_status = 'ENROLLED'",
+#         {"sid": student_id, "sec": section_id}
+#     )
+#     if existing:
+#         return
+    
+#     req_type = "ADD" if acting_role == "SELF" else "FACULTY-ADVISE"
+#     source   = "SELF" if acting_role == "SELF" else "FACULTY"
+
+#     # Insert request
+#     execute(
+#         """
+#         INSERT INTO registration_requests
+#             (students_id, section_id, users_id, request_type, request_reason,
+#              request_status, processed_at, processed_note)
+#         VALUES
+#             (:sid, :sec, :actor, :rtype, :reason,
+#              'APPROVED', SYSTIMESTAMP, 'Auto-approved via portal')
+#         """,
+#         {
+#             "sid": student_id, "sec": section_id, "actor": actor_id,
+#             "rtype": req_type, "reason": f"Self-registration: {course_code} {section_name}",
+#         },
+#         commit=False,
+#     )
+
+#     # Get the new request_id
+#     req_row = fetch_one(
+#         """
+#         SELECT MAX(request_id) AS rid FROM registration_requests
+#         WHERE students_id = :sid AND section_id = :sec
+#         """,
+#         {"sid": student_id, "sec": section_id},
+#     )
+#     req_id = req_row["rid"] if req_row else None
+
 def _do_enroll(student_id: str, section_id: int, actor_id: str,
                acting_role: str, course_code: str, section_name: str):
     """Insert registration_request + enrollment, decrement seats, log provenance."""
@@ -148,27 +190,44 @@ def _do_enroll(student_id: str, section_id: int, actor_id: str,
     if existing:
         return
     
-    req_type = "ADD" if acting_role == "SELF" else "FACULTY-ADVISE"
+    # Use 'ADD' to avoid Check Constraint violation if it was 'FACULTY-ADVISE'
+    req_type = "ADD"
+    note     = "Auto-approved via portal" if acting_role == "SELF" else "Faculty Advise"
     source   = "SELF" if acting_role == "SELF" else "FACULTY"
 
-    # Insert request
-    execute(
-        """
-        INSERT INTO registration_requests
-            (students_id, section_id, users_id, request_type, request_reason,
-             request_status, processed_at, processed_note)
-        VALUES
-            (:sid, :sec, :actor, :rtype, :reason,
-             'APPROVED', SYSTIMESTAMP, 'Auto-approved via portal')
-        """,
-        {
-            "sid": student_id, "sec": section_id, "actor": actor_id,
-            "rtype": req_type, "reason": f"Self-registration: {course_code} {section_name}",
-        },
-        commit=False,
-    )
+    # --- FIX: Handle Unique Constraints gracefully via Update pattern ---
+    req_exists = fetch_one("SELECT request_id FROM registration_requests WHERE students_id = :sid AND section_id = :sec", {"sid": student_id, "sec": section_id})
+    
+    if req_exists:
+        execute(
+            """
+            UPDATE registration_requests
+            SET    request_type = :rtype, request_reason = :reason, request_status = 'APPROVED', 
+                   processed_at = SYSTIMESTAMP, processed_note = :note, users_id = :actor
+            WHERE  students_id = :sid AND section_id = :sec
+            """,
+            {"sid": student_id, "sec": section_id, "actor": actor_id, "rtype": req_type, "reason": f"Registration: {course_code} {section_name}", "note": note},
+            commit=False
+        )
+    else:
+        execute(
+            """
+            INSERT INTO registration_requests
+                (students_id, section_id, users_id, request_type, request_reason,
+                 request_status, processed_at, processed_note)
+            VALUES
+                (:sid, :sec, :actor, :rtype, :reason,
+                 'APPROVED', SYSTIMESTAMP, :note)
+            """,
+            {
+                "sid": student_id, "sec": section_id, "actor": actor_id,
+                "rtype": req_type, "reason": f"Registration: {course_code} {section_name}",
+                "note": note
+            },
+            commit=False,
+        )
 
-    # Get the new request_id
+    # Get the request_id
     req_row = fetch_one(
         """
         SELECT MAX(request_id) AS rid FROM registration_requests
@@ -234,6 +293,43 @@ def _do_enroll(student_id: str, section_id: int, actor_id: str,
     )
 
 
+# def _do_drop(student_id: str, section_id: int, actor_id: str,
+#              acting_role: str, course_code: str, section_name: str,
+#              drop_reason: str = ""):
+#     """Drop an enrollment, increment seats, log provenance."""
+    
+#     # --- FIX: Prevent double-drop and double seat increment ---
+#     existing = fetch_one(
+#         "SELECT enrollment_id FROM enrollments WHERE students_id = :sid AND section_id = :sec AND enrollment_status = 'ENROLLED'",
+#         {"sid": student_id, "sec": section_id}
+#     )
+#     if not existing:
+#         return
+#     # Insert drop request
+#     execute(
+#         """
+#         INSERT INTO registration_requests
+#             (students_id, section_id, users_id, request_type, request_reason,
+#              request_status, processed_at)
+#         VALUES
+#             (:sid, :sec, :actor, 'DROP', :reason, 'APPROVED', SYSTIMESTAMP)
+#         """,
+#         {
+#             "sid": student_id, "sec": section_id, "actor": actor_id,
+#             "reason": drop_reason or "Student drop",
+#         },
+#         commit=False,
+#     )
+
+#     req_row = fetch_one(
+#         """
+#         SELECT MAX(request_id) AS rid FROM registration_requests
+#         WHERE students_id = :sid AND section_id = :sec AND request_type = 'DROP'
+#         """,
+#         {"sid": student_id, "sec": section_id},
+#     )
+#     req_id = req_row["rid"] if req_row else None
+
 def _do_drop(student_id: str, section_id: int, actor_id: str,
              acting_role: str, course_code: str, section_name: str,
              drop_reason: str = ""):
@@ -246,26 +342,41 @@ def _do_drop(student_id: str, section_id: int, actor_id: str,
     )
     if not existing:
         return
-    # Insert drop request
-    execute(
-        """
-        INSERT INTO registration_requests
-            (students_id, section_id, users_id, request_type, request_reason,
-             request_status, processed_at)
-        VALUES
-            (:sid, :sec, :actor, 'DROP', :reason, 'APPROVED', SYSTIMESTAMP)
-        """,
-        {
-            "sid": student_id, "sec": section_id, "actor": actor_id,
-            "reason": drop_reason or "Student drop",
-        },
-        commit=False,
-    )
+
+    # --- FIX: Handle Unique Constraints gracefully via Update pattern ---
+    req_exists = fetch_one("SELECT request_id FROM registration_requests WHERE students_id = :sid AND section_id = :sec", {"sid": student_id, "sec": section_id})
+
+    if req_exists:
+        execute(
+            """
+            UPDATE registration_requests
+            SET    request_type = 'DROP', request_reason = :reason, request_status = 'APPROVED', 
+                   processed_at = SYSTIMESTAMP, users_id = :actor
+            WHERE  students_id = :sid AND section_id = :sec
+            """,
+            {"sid": student_id, "sec": section_id, "actor": actor_id, "reason": drop_reason or "Student drop"},
+            commit=False
+        )
+    else:
+        execute(
+            """
+            INSERT INTO registration_requests
+                (students_id, section_id, users_id, request_type, request_reason,
+                 request_status, processed_at)
+            VALUES
+                (:sid, :sec, :actor, 'DROP', :reason, 'APPROVED', SYSTIMESTAMP)
+            """,
+            {
+                "sid": student_id, "sec": section_id, "actor": actor_id,
+                "reason": drop_reason or "Student drop",
+            },
+            commit=False,
+        )
 
     req_row = fetch_one(
         """
         SELECT MAX(request_id) AS rid FROM registration_requests
-        WHERE students_id = :sid AND section_id = :sec AND request_type = 'DROP'
+        WHERE students_id = :sid AND section_id = :sec
         """,
         {"sid": student_id, "sec": section_id},
     )
