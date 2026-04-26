@@ -238,16 +238,50 @@ def _do_enroll(student_id: str, section_id: int, actor_id: str,
     req_id = req_row["rid"] if req_row else None
 
     # Insert enrollment
-    execute(
-        """
-        INSERT INTO enrollments
-            (students_id, section_id, users_user_id, enrollment_source, enrollment_status)
-        VALUES
-            (:sid, :sec, :actor, :source, 'ENROLLED')
-        """,
-        {"sid": student_id, "sec": section_id, "actor": actor_id, "source": source},
-        commit=False,
+    # execute(
+    #     """
+    #     INSERT INTO enrollments
+    #         (students_id, section_id, users_user_id, enrollment_source, enrollment_status)
+    #     VALUES
+    #         (:sid, :sec, :actor, :source, 'ENROLLED')
+    #     """,
+    #     {"sid": student_id, "sec": section_id, "actor": actor_id, "source": source},
+    #     commit=False,
+    # )
+
+    enrollment_exists = fetch_one(
+        "SELECT enrollment_id FROM enrollments WHERE students_id = :sid AND section_id = :sec", 
+        {"sid": student_id, "sec": section_id}
     )
+
+    if enrollment_exists:
+        # If they were previously enrolled and dropped, just reactivate it!
+        execute(
+            """
+            UPDATE enrollments
+            SET    enrollment_status = 'ENROLLED',
+                   enrolled_at = SYSTIMESTAMP,
+                   dropped_at = NULL,
+                   drop_reason = NULL,
+                   enrollment_source = :source,
+                   users_user_id = :actor
+            WHERE  students_id = :sid AND section_id = :sec
+            """,
+            {"sid": student_id, "sec": section_id, "actor": actor_id, "source": source},
+            commit=False
+        )
+    else:
+        # Insert a brand new enrollment
+        execute(
+            """
+            INSERT INTO enrollments
+                (students_id, section_id, users_user_id, enrollment_source, enrollment_status)
+            VALUES
+                (:sid, :sec, :actor, :source, 'ENROLLED')
+            """,
+            {"sid": student_id, "sec": section_id, "actor": actor_id, "source": source},
+            commit=False,
+        )
 
     # Decrement available_seats
     execute(
