@@ -1,0 +1,2 @@
+from components.registration_panel import render_registration_panels
+from components.curriculum_viewer import show_curriculum
