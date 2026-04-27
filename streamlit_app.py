@@ -1,13 +1,13 @@
 """
 streamlit_app.py
-Entry point for the University Course Registration System.
+Entry point for the University Course Advising System.
 Handles login gate, session management, sidebar navigation, and page routing.
 """
 
 import streamlit as st
 
 st.set_page_config(
-    page_title="University Registration System",
+    page_title="University Course Advising System",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -41,7 +41,7 @@ if not is_logged_in():
 role = st.session_state.role
 
 with st.sidebar:
-    st.markdown(f"### 🎓 URS")
+    st.markdown(f"### 🎓 University Course Advising System")
     st.markdown(f"**{st.session_state.get('display_name', st.session_state.user_id)}**")
     sem = st.session_state.get("active_semester")
     if sem:
