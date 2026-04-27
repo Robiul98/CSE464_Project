@@ -41,7 +41,7 @@ if not is_logged_in():
 role = st.session_state.role
 
 with st.sidebar:
-    st.markdown(f"### 🎓 University Course Advising System")
+    st.markdown(f"### 🎓 Advising System")
     st.markdown(f"**{st.session_state.get('display_name', st.session_state.user_id)}**")
     sem = st.session_state.get("active_semester")
     if sem:
