@@ -789,6 +789,10 @@ def _panel_header():
 # Public entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
+import streamlit as st
+from db import fetch_all # Assuming this is imported at the top of your file
+# Make sure to keep your other imports like _enrolled_sections, _panel_header, etc.
+
 def render_registration_panels(
     student_id: str,
     acting_role: str,
@@ -804,7 +808,7 @@ def render_registration_panels(
     f_ids = _f_grade_course_ids(student_id)
     p_ids = _passed_course_ids(student_id)
 
-    # Current enrollments
+    # ── 1. CURRENT ENROLLMENTS (Always visible at the top) ────────────────────
     with st.expander("✅ Current Enrollments", expanded=True):
         st.caption("Courses you are currently enrolled in this semester. You can drop them here.")
 
@@ -850,33 +854,73 @@ def render_registration_panels(
                         "panelE",
                     )
 
-    # Panel A: F Grade Courses
-    with st.expander("🔴 Panel A — F Grade Courses", expanded=False):
-        st.caption("Courses you have previously failed that are offered this semester.")
+    st.write("") # Adding a little spacing
+    st.markdown("### 📖 Course Catalog")
+    
+    # ── CUSTOM CSS FOR TAB STYLING ────────────────────────────────────────────
+    st.markdown(
+        """
+        <style>
+        /* 1. Increases the horizontal gap between tabs */
+        div[data-baseweb="tab-list"] {
+            gap: 40px; 
+        }
 
-        if not f_ids:
-            st.info("No F grade courses found.")
+        /* 2. Increases the font size of the tab text */
+        button[data-baseweb="tab"] p {
+            font-size: 18px !important;  
+            font-weight: 600 !important; 
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # ── 2. THE TABBED MENU (Replaces Expanders A, B, and C) ───────────────────
+    tab_general, tab_retake, tab_f_grade = st.tabs([
+        "📋 Offered Courses ", 
+        "🔁 Retakable Courses ", 
+        "🔴 F Grade Courses "
+    ])
+
+    # --- TAB 1: General Registration ---
+    with tab_general:
+        st.caption("All eligible courses excluding F-grade, retakable, and unmet prerequisites.")
+
+        all_rows = _all_offered_sections(semester_id)
+        general_rows = []
+
+        for row in all_rows:
+            cid = row["course_id"]
+
+            if row["section_id"] in enrolled:
+                continue
+            if cid in f_ids:
+                continue
+            if cid in p_ids:
+                continue
+            if not _prereqs_met(student_id, cid, p_ids):
+                continue
+
+            general_rows.append(row)
+
+        if not general_rows:
+            st.info("No eligible courses available for general registration.")
         else:
-            rows = _sections_for_courses(f_ids, semester_id)
-            rows = [r for r in rows if r["section_id"] not in enrolled]
+            _panel_header()
+            for row in general_rows:
+                _render_section_row(
+                    row,
+                    enrolled,
+                    student_id,
+                    actor_id,
+                    acting_role,
+                    drop_deadline,
+                    "panelC",
+                )
 
-            if not rows:
-                st.info("Your F grade courses are not offered or you are already enrolled.")
-            else:
-                _panel_header()
-                for row in rows:
-                    _render_section_row(
-                        row,
-                        enrolled,
-                        student_id,
-                        actor_id,
-                        acting_role,
-                        drop_deadline,
-                        "panelA",
-                    )
-
-    # Panel B: Retakable Courses
-    with st.expander("🔁 Panel B — Retakable Courses", expanded=False):
+    # --- TAB 2: Retakable Courses ---
+    with tab_retake:
         st.caption("Courses you have already passed that you wish to retake.")
 
         if not p_ids:
@@ -900,48 +944,35 @@ def render_registration_panels(
                         "panelB",
                     )
 
-    # Panel C: General Registration
-    with st.expander("📋 Panel C — General Registration", expanded=False):
-        st.caption("All eligible courses excluding F-grade, retakable, and unmet prerequisites.")
+    # --- TAB 3: F Grade Courses ---
+    with tab_f_grade:
+        st.caption("Courses you have previously failed that are offered this semester.")
 
-        all_rows = _all_offered_sections(semester_id)
-        general_rows = []
-
-        for row in all_rows:
-            cid = row["course_id"]
-
-            if row["section_id"] in enrolled:
-                continue
-
-            if cid in f_ids:
-                continue
-
-            if cid in p_ids:
-                continue
-
-            if not _prereqs_met(student_id, cid, p_ids):
-                continue
-
-            general_rows.append(row)
-
-        if not general_rows:
-            st.info("No eligible courses available for general registration.")
+        if not f_ids:
+            st.success("🎉 Excellent! You have no F grade courses to clear.")
         else:
-            _panel_header()
-            for row in general_rows:
-                _render_section_row(
-                    row,
-                    enrolled,
-                    student_id,
-                    actor_id,
-                    acting_role,
-                    drop_deadline,
-                    "panelC",
-                )
+            rows = _sections_for_courses(f_ids, semester_id)
+            rows = [r for r in rows if r["section_id"] not in enrolled]
 
-    # Faculty-only section change
+            if not rows:
+                st.info("Your F grade courses are not offered this term or you are already enrolled.")
+            else:
+                _panel_header()
+                for row in rows:
+                    _render_section_row(
+                        row,
+                        enrolled,
+                        student_id,
+                        actor_id,
+                        acting_role,
+                        drop_deadline,
+                        "panelA",
+                    )
+
+    # ── 3. FACULTY CONTROLS ───────────────────────────────────────────────────
     if acting_role == "FACULTY":
-        with st.expander("🔄 Section Change", expanded=False):
+        st.write("")
+        with st.expander("🔄 Faculty Section Change", expanded=False):
             _render_section_change(student_id, actor_id, semester_id, enrolled)
 
 

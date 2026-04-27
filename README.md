@@ -1,54 +1,9 @@
-# University Course Registration System
+# 🎓 East West University Course Registration System
 
 A Streamlit web application for managing university course registration, faculty advising, and administrative operations. Backend is **Oracle Autonomous Free DB**.
 
 ---
-
-## Setup
-
-### 1. Clone the repo
-```bash
-git clone https://github.com/your-username/your-repo.git
-cd your-repo
-```
-
-### 2. Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Configure DB credentials
-Copy the secrets template and fill in your Oracle credentials:
-```bash
-cp .streamlit/secrets.toml.template .streamlit/secrets.toml
-# Edit .streamlit/secrets.toml with your DB_USER, DB_PASSWORD, DB_DSN
-```
-
-### 4. Set up the Oracle DB
-Run the following SQL scripts **in order** on your Oracle Autonomous Free DB (via SQL Developer, SQLcl, or the Oracle console):
-
-```
-1. your_original_schema.ddl      ← your provided DDL (run first)
-2. sql/faculty_messages.sql      ← new table not in original DDL
-3. sql/triggers.sql              ← seat management triggers
-4. sql/functions.sql             ← fn_prereqs_met, fn_is_window_open
-5. sql/procedures.sql            ← proc_process_request, proc_auto_advise
-```
-
-### 5. Run locally
-```bash
-streamlit run streamlit_app.py
-```
-
-### 6. Deploy to Streamlit Community Cloud
-- Push your repo to GitHub (without secrets.toml)
-- Connect repo at https://share.streamlit.io
-- Add your secrets in the Streamlit Cloud dashboard under **App settings → Secrets**
-
----
-
-## Project Structure
-
+## 📁 Project Structure
 ```
 streamlit_app.py              # Entry point — login, sidebar, routing
 requirements.txt
@@ -96,7 +51,7 @@ sql/
 
 ---
 
-## Roles
+## 👱 Roles
 
 | Role    | Key Capabilities |
 |---------|-----------------|
@@ -106,9 +61,29 @@ sql/
 
 ---
 
-## Notes
+## 📒 Notes
 
 - Passwords must be stored as **bcrypt hashes** in `users.password_hash`
 - The `oracledb` driver runs in **thin mode** — no Oracle Client installation needed
 - All data changes write to `provenance_log` via `utils/provenance.py`
 - The SQL terminal is admin-only and passes raw SQL directly to Oracle — for demo/presentation use
+
+
+---
+
+## 🚀 Key Features & Technical Highlights
+
+This application is built with robust security, strict business logic, and comprehensive auditing to simulate a real-world university environment:
+
+* **Advanced Concurrency Control:** Implements a strict "first-come, first-serve" mechanism for seat management. If multiple students attempt to claim the last remaining seat in a section simultaneously, the system safely processes the requests without double-booking.
+* **Comprehensive Conflict Checking:** The registration engine automatically prevents scheduling errors. It thoroughly checks for section time conflicts, ensuring a student cannot register for overlapping classes.
+* **Tiered Advising Windows:** Advising access is dynamically categorized based on student credits and time windows (e.g., seniors registering before freshmen), alongside specific time-based advising windows allocated by faculty.
+* **Granular Provenance Logging:** Every insert, update, or delete action performed by a Student, Faculty, or Admin is recorded in the `provenance_log`. This guarantees total transparency and accountability across the system.
+* **SQL Injection Prevention:** All database transactions enforce the use of **bind variables** rather than string formatting, completely escaping malicious inputs and preventing SQL injection attacks.
+* **Secure Authentication:** User passwords are encrypted using **bcrypt hashing**, ensuring sensitive credentials are never stored in plaintext.
+* **Admin SQL Terminal:** A built-in terminal allows administrators and faculty to directly query the database, evaluate provenance tracking, and maintain historical audits natively within the browser.
+* **Database Triggers:** Utilizes Oracle database triggers to automatically manage seat counts and enforce data integrity constraints at the database level.
+
+---
+
+

@@ -6,13 +6,15 @@ Student's own read-only profile view.
 import streamlit as st
 from db import fetch_one
 
-
 def render():
-    st.title("👤 My Profile")
+    # 1. Welcoming Header
+    st.markdown("## 🎓 My Academic Profile")
+    st.markdown("View your current academic standing, program details, and progress.")
+    st.divider()
 
     uid = st.session_state.user_id
     
-    # The comment is now OUTSIDE the SQL string so Oracle won't read it
+    # 2. Database Fetch (Logic untouched)
     row = fetch_one(
         """
         SELECT s.users_user_id, s.student_name, s.email, s.department,
@@ -27,33 +29,51 @@ def render():
     )
 
     if not row:
-        st.error("Profile not found.")
+        st.warning("⚠️ **Profile not found.** Please contact the administration office.")
         return
 
     status = row["student_status"]
 
+    # 3. High-Priority Alert (Enhanced visual weight)
     if status == "PROBATION":
-        st.error("🔴 **ON ACADEMIC PROBATION** — Self-registration is disabled. Contact your advisor.")
+        st.error(
+            "🚨 **ACTION REQUIRED: ACADEMIC PROBATION** \n\n"
+            "Self-registration is currently disabled. Please schedule a meeting with your academic advisor immediately to discuss your next steps."
+        )
 
+    # 4. Key Academic Metrics (Eye-catching top row)
+    st.subheader("📊 My Status")
+    
+    # Using metrics makes the important numbers pop out to the student
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(label="CGPA", value=f"{float(row['cgpa']):.2f}")
+    m2.metric(label="Credits Completed", value=str(row['credits_completed']))
+    m3.metric(label="Semester", value=str(row['semester_no'] or '—'))
+    
+    status_colors = {
+        "ACTIVE": "🟢 Active",
+        "PROBATION": "🔴 Probation",
+        "INACTIVE": "⚫ Inactive",
+        "GRADUATED": "🎓 Graduated",
+    }
+    m4.metric(label="Standing", value=status_colors.get(status, status))
+
+    st.write("") # Add a little breathing room
+
+    # 5. Detailed Information Container
+    st.subheader("📋 Profile Details")
     with st.container(border=True):
         col1, col2 = st.columns(2)
+        
         with col1:
-            st.markdown(f"**Student Name:** {row['student_name']}")
+            st.markdown("#### 👤 Personal Information")
+            st.markdown(f"**Name:** {row['student_name']}")
             st.markdown(f"**Student ID:** {row['users_user_id']}")
             st.markdown(f"**Email:** {row['email'] or '—'}")
+            
+        with col2:
+            st.markdown("#### 🏛️ Program Details")
             st.markdown(f"**Department:** {row['department'] or '—'}")
             st.markdown(f"**Program:** {row['program'] or '—'}")
-        with col2:
-            st.markdown(f"**Current Semester:** {row['semester_no'] or '—'}")
             st.markdown(f"**Admission Term:** {row['admission_term'] or '—'}")
-            st.markdown(f"**Credits Completed:** {row['credits_completed']}")
-            st.markdown(f"**CGPA:** {float(row['cgpa']):.2f}")
-            st.markdown(f"**Advisor:** {row['advisor_name'] or '—'}")
-
-        status_colors = {
-            "ACTIVE": "🟢 ACTIVE",
-            "PROBATION": "🔴 PROBATION",
-            "INACTIVE": "⚫ INACTIVE",
-            "GRADUATED": "🎓 GRADUATED",
-        }
-        st.markdown(f"**Status:** {status_colors.get(status, status)}")
+            st.markdown(f"**Academic Advisor:** {row['advisor_name'] or '—'}")
