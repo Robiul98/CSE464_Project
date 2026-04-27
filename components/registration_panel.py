@@ -475,7 +475,19 @@ def _do_enroll(student_id: str, section_id: int, actor_id: str,
         return True
 
     except Exception as e:
-        st.error(f"Enrollment failed: {e}")
+        error_msg = str(e)
+
+        if "ORA-20005" in error_msg:
+            st.error("⚠️ Schedule conflict: this section overlaps with one of your enrolled courses.")
+        elif "ORA-20004" in error_msg:
+            st.error("⚠️ You are already enrolled in another section of this same course.")
+        elif "ORA-20002" in error_msg:
+            st.error("⚠️ You are already enrolled in this section.")
+        elif "ORA-20001" in error_msg:
+            st.error("⚠️ No available seats in this section.")
+        else:
+            st.error(f"Enrollment failed: {e}")
+
         return False
 
 
