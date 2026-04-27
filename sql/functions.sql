@@ -97,3 +97,87 @@ EXCEPTION
         RETURN 'N';
 END fn_is_window_open;
 /
+
+CREATE OR REPLACE FUNCTION fn_has_schedule_conflict (
+    p_student_id IN VARCHAR2,
+    p_section_id IN NUMBER
+) RETURN CHAR
+IS
+    v_count NUMBER;
+BEGIN
+    SELECT COUNT(*)
+    INTO   v_count
+    FROM   section_schedule new_s
+    JOIN   course_sections new_cs
+           ON new_s.section_id = new_cs.section_id
+    JOIN   course_offerings new_co
+           ON new_cs.offering_id = new_co.offering_id
+    WHERE  new_s.section_id = p_section_id
+      AND  EXISTS (
+            SELECT 1
+            FROM   enrollments e
+            JOIN   course_sections old_cs
+                   ON e.section_id = old_cs.section_id
+            JOIN   course_offerings old_co
+                   ON old_cs.offering_id = old_co.offering_id
+            JOIN   section_schedule old_s
+                   ON old_s.section_id = e.section_id
+            WHERE  e.students_id = p_student_id
+              AND  e.enrollment_status = 'ENROLLED'
+
+              -- same semester only
+              AND  old_co.semesters_id = new_co.semesters_id
+
+              -- same day, safely compared
+              AND  UPPER(TRIM(old_s.day_of_week)) = UPPER(TRIM(new_s.day_of_week))
+
+              -- compare only HH24:MI time part, not full timestamp date
+              AND  TO_NUMBER(TO_CHAR(new_s.start_time, 'HH24MI'))
+                   < TO_NUMBER(TO_CHAR(old_s.end_time, 'HH24MI'))
+
+              AND  TO_NUMBER(TO_CHAR(new_s.end_time, 'HH24MI'))
+                   > TO_NUMBER(TO_CHAR(old_s.start_time, 'HH24MI'))
+      );
+
+    IF v_count > 0 THEN
+        RETURN 'Y';
+    ELSE
+        RETURN 'N';
+    END IF;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        -- For debugging, do not silently allow enrollment
+        RETURN 'Y';
+END fn_has_schedule_conflict;
+/
+
+CREATE OR REPLACE FUNCTION fn_has_schedule_conflict (
+    p_student_id IN VARCHAR2,
+    p_section_id IN NUMBER
+) RETURN CHAR
+IS
+    v_count NUMBER;
+BEGIN
+    SELECT COUNT(*)
+    INTO   v_count
+    FROM   section_schedule new_s
+    WHERE  new_s.section_id = p_section_id
+      AND  EXISTS (
+               SELECT 1
+               FROM   enrollments e
+               JOIN   section_schedule ex_s ON ex_s.section_id = e.section_id
+               WHERE  e.students_id       = p_student_id
+                 AND  e.enrollment_status = 'ENROLLED'
+                 AND  ex_s.day_of_week    = new_s.day_of_week
+                 AND  new_s.start_time    < ex_s.end_time
+                 AND  new_s.end_time      > ex_s.start_time
+           );
+
+    RETURN CASE WHEN v_count > 0 THEN 'Y' ELSE 'N' END;
+
+EXCEPTION
+    WHEN OTHERS THEN RETURN 'N';
+END fn_has_schedule_conflict;
+/
+

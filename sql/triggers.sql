@@ -76,3 +76,50 @@ BEGIN
     );
 END;
 /
+
+CREATE OR REPLACE TRIGGER trg_no_schedule_conflict
+    BEFORE INSERT OR UPDATE OF section_id, enrollment_status ON enrollments
+    FOR EACH ROW
+    WHEN (NEW.enrollment_status = 'ENROLLED')
+DECLARE
+    v_conflict CHAR(1);
+BEGIN
+    v_conflict := fn_has_schedule_conflict(:NEW.students_id, :NEW.section_id);
+
+    IF v_conflict = 'Y' THEN
+        RAISE_APPLICATION_ERROR(
+            -20005,
+            'Schedule conflict: this section overlaps with an existing enrollment.'
+        );
+    END IF;
+END;
+/
+
+    
+CREATE OR REPLACE TRIGGER trg_no_duplicate_course
+    BEFORE INSERT ON enrollments
+    FOR EACH ROW
+    WHEN (NEW.enrollment_status = 'ENROLLED')
+DECLARE
+    v_count NUMBER;
+BEGIN
+    SELECT COUNT(*)
+    INTO   v_count
+    FROM   enrollments e
+    JOIN   course_sections  cs  ON e.section_id    = cs.section_id
+    JOIN   course_offerings co  ON cs.offering_id  = co.offering_id
+    JOIN   course_sections  cs2 ON cs2.section_id  = :NEW.section_id
+    JOIN   course_offerings co2 ON cs2.offering_id = co2.offering_id
+    WHERE  e.students_id       = :NEW.students_id
+      AND  e.enrollment_status = 'ENROLLED'
+      AND  co.course_id        = co2.course_id;
+
+    IF v_count > 0 THEN
+        RAISE_APPLICATION_ERROR(-20004,
+            'Student is already enrolled in another section of this course.');
+    END IF;
+END;
+/
+
+
+

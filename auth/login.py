@@ -64,7 +64,7 @@ def render_login():
     """Render the login page. Returns True if login succeeded."""
 
     st.markdown(
-        "<h1 style='text-align:center;margin-top:60px;'>🎓 University Registration System</h1>",
+        "<h1 style='text-align:center;margin-top:60px;'>🎓 University Course Advising System</h1>",
         unsafe_allow_html=True,
     )
 
