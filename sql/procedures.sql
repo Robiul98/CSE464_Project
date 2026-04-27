@@ -264,3 +264,167 @@ EXCEPTION
         RAISE;
 END proc_auto_advise;
 /
+
+
+CREATE OR REPLACE PROCEDURE proc_process_request (
+    p_student_id     IN  VARCHAR2,
+    p_section_id     IN  NUMBER,
+    p_actor_id       IN  VARCHAR2,
+    p_request_type   IN  VARCHAR2,
+    p_enrollment_src IN  VARCHAR2,
+    p_reason         IN  VARCHAR2,
+    p_request_id     OUT NUMBER
+)
+IS
+    v_avail  NUMBER;
+    v_exists NUMBER;
+BEGIN
+    -- Insert registration request (status = APPROVED for direct processing)
+    INSERT INTO registration_requests (
+        students_id, section_id, users_id,
+        request_type, request_reason,
+        request_status, processed_at, processed_note
+    ) VALUES (
+        p_student_id, p_section_id, p_actor_id,
+        p_request_type, p_reason,
+        'APPROVED', SYSTIMESTAMP, 'Processed via proc_process_request'
+    )
+    RETURNING request_id INTO p_request_id;
+
+    -- Handle ADD types
+    IF p_request_type IN ('ADD', 'FACULTY-ADVISE', 'ADMIN-OVERRIDE', 'AUTO-ADVISE') THEN
+
+        -- Check available seats
+        SELECT available_seats
+        INTO   v_avail
+        FROM   course_sections
+        WHERE  section_id = p_section_id
+        FOR UPDATE;
+
+        IF v_avail <= 0 THEN
+            ROLLBACK;
+            RAISE_APPLICATION_ERROR(-20001, 'No available seats in section ' || p_section_id);
+        END IF;
+
+        -- Check not already enrolled in this exact section
+        SELECT COUNT(*)
+        INTO   v_exists
+        FROM   enrollments
+        WHERE  students_id       = p_student_id
+          AND  section_id        = p_section_id
+          AND  enrollment_status = 'ENROLLED';
+
+        IF v_exists > 0 THEN
+            ROLLBACK;
+            RAISE_APPLICATION_ERROR(-20002, 'Student already enrolled in section ' || p_section_id);
+        END IF;
+
+        -- *** FIX 1: Check not enrolled in a different section of the same course ***
+        SELECT COUNT(*)
+        INTO   v_exists
+        FROM   enrollments e
+        JOIN   course_sections cs  ON e.section_id    = cs.section_id
+        JOIN   course_offerings co ON cs.offering_id  = co.offering_id
+        JOIN   course_sections  cs2 ON cs2.section_id = p_section_id
+        JOIN   course_offerings co2 ON cs2.offering_id = co2.offering_id
+        WHERE  e.students_id       = p_student_id
+          AND  e.enrollment_status = 'ENROLLED'
+          AND  co.course_id        = co2.course_id;
+
+        IF v_exists > 0 THEN
+            ROLLBACK;
+            RAISE_APPLICATION_ERROR(-20004,
+                'Student is already enrolled in another section of this course.');
+        END IF;
+
+        -- *** FIX 2: Check for schedule/time conflict ***
+        IF fn_has_schedule_conflict(p_student_id, p_section_id) = 'Y' THEN
+            ROLLBACK;
+            RAISE_APPLICATION_ERROR(-20005,
+                'Schedule conflict: this section overlaps with an existing enrollment.');
+        END IF;
+
+        
+        -- Insert enrollment
+        INSERT INTO enrollments (
+            students_id, section_id, users_user_id,
+            enrollment_source, enrollment_status
+        ) VALUES (
+            p_student_id, p_section_id, p_actor_id,
+            p_enrollment_src, 'ENROLLED'
+        );
+
+        -- Decrement seats
+        UPDATE course_sections
+        SET    available_seats = available_seats - 1,
+               section_status  = CASE
+                                     WHEN available_seats - 1 <= 0 THEN 'FULL'
+                                     ELSE section_status
+                                 END
+        WHERE  section_id = p_section_id;
+
+        -- Log seat history
+        INSERT INTO section_seat_history (
+            sections_id, old_available_seats, new_available_seats,
+            users_user_id, change_reason, request_id
+        )
+        SELECT section_id,
+               available_seats + 1,
+               available_seats,
+               p_actor_id,
+               'Enrollment via proc_process_request',
+               p_request_id
+        FROM   course_sections
+        WHERE  section_id = p_section_id;
+
+    -- Handle DROP
+    ELSIF p_request_type = 'DROP' THEN
+
+        -- Update enrollment to DROPPED
+        UPDATE enrollments
+        SET    enrollment_status = 'DROPPED',
+               dropped_at        = SYSTIMESTAMP,
+               drop_reason       = p_reason,
+               users_user_id1    = p_actor_id
+        WHERE  students_id        = p_student_id
+          AND  section_id         = p_section_id
+          AND  enrollment_status  = 'ENROLLED';
+
+        IF SQL%ROWCOUNT = 0 THEN
+            ROLLBACK;
+            RAISE_APPLICATION_ERROR(-20003, 'No active enrollment found to drop.');
+        END IF;
+
+        -- Increment seats (trigger also fires but explicit update ensures consistency)
+        UPDATE course_sections
+        SET    available_seats = available_seats + 1,
+               section_status  = CASE
+                                     WHEN section_status = 'FULL' THEN 'OPEN'
+                                     ELSE section_status
+                                 END
+        WHERE  section_id = p_section_id;
+
+        -- Log seat history
+        INSERT INTO section_seat_history (
+            sections_id, old_available_seats, new_available_seats,
+            users_user_id, change_reason, request_id
+        )
+        SELECT section_id,
+               available_seats - 1,
+               available_seats,
+               p_actor_id,
+               'Drop via proc_process_request',
+               p_request_id
+        FROM   course_sections
+        WHERE  section_id = p_section_id;
+
+    END IF;
+
+    COMMIT;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        RAISE;
+END proc_process_request;
+/
