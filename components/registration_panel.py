@@ -432,15 +432,31 @@ def _do_drop(student_id: str, section_id: int, actor_id: str,
         commit=False,
     )
 
+    # execute(
+    #     """
+    #     UPDATE course_sections
+    #     SET    available_seats = available_seats + 1,
+    #            section_status = CASE WHEN section_status = 'FULL' THEN 'OPEN' ELSE section_status END
+    #     WHERE  section_id = :sec
+    #     """,
+    #     {"sec": section_id},
+    #     commit=False,
+    # )
     execute(
         """
-        UPDATE course_sections
-        SET    available_seats = available_seats + 1,
-               section_status = CASE WHEN section_status = 'FULL' THEN 'OPEN' ELSE section_status END
-        WHERE  section_id = :sec
+        INSERT INTO section_seat_history
+            (sections_id, old_available_seats, new_available_seats,
+             users_user_id, change_reason, request_id)
+        SELECT section_id,
+               available_seats - 1,
+               available_seats,
+               :actor,
+               'Drop',
+               NULL -- Changed from :rid to prevent unique constraint violations on reused requests
+        FROM   course_sections WHERE section_id = :sec
         """,
-        {"sec": section_id},
-        commit=False,
+        {"actor": actor_id, "sec": section_id}, # Removed "rid": req_id
+        commit=True,
     )
 
     execute(
@@ -846,10 +862,18 @@ def _render_section_change(student_id: str, actor_id: str,
         st.error("Selected section is full.")
         return
 
+    # if st.button("Confirm Section Change", type="primary", key="sc_confirm"):
+    #     # Drop old, add new
+    #     _do_drop(student_id, selected["section_id"], actor_id, "FACULTY",
+    #              selected["course_code"], selected["current_section"], "Section change by faculty")
+    #     _do_enroll(student_id, new_sec["section_id"], actor_id, "FACULTY",
+    #                selected["course_code"], new_sec["section_name"])
+    #     st.toast(f"Section changed to {new_sec['section_name']}", icon="✅")
+    #     st.rerun()
     if st.button("Confirm Section Change", type="primary", key="sc_confirm"):
         # Drop old, add new
         _do_drop(student_id, selected["section_id"], actor_id, "FACULTY",
-                 selected["course_code"], selected["current_section"], "Section change by faculty")
+                 selected["course_code"], selected["current_section"], "Section change") # Shortened string
         _do_enroll(student_id, new_sec["section_id"], actor_id, "FACULTY",
                    selected["course_code"], new_sec["section_name"])
         st.toast(f"Section changed to {new_sec['section_name']}", icon="✅")
