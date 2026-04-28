@@ -425,21 +425,6 @@ def _do_enroll(student_id: str, section_id: int, actor_id: str,
                 commit=False,
             )
 
-        # Decrement available seats
-        execute(
-            """
-            UPDATE course_sections
-            SET    available_seats = available_seats - 1,
-                   section_status = CASE
-                       WHEN available_seats - 1 <= 0 THEN 'FULL'
-                       ELSE section_status
-                   END
-            WHERE  section_id = :sec
-            """,
-            {"sec": section_id},
-            commit=False,
-        )
-
         # Seat history
         execute(
             """
@@ -600,21 +585,6 @@ def _do_drop(student_id: str, section_id: int, actor_id: str,
                 "sid": student_id,
                 "sec": section_id,
             },
-            commit=False,
-        )
-
-        # Increment available seats
-        execute(
-            """
-            UPDATE course_sections
-            SET    available_seats = available_seats + 1,
-                   section_status = CASE
-                       WHEN section_status = 'FULL' THEN 'OPEN'
-                       ELSE section_status
-                   END
-            WHERE  section_id = :sec
-            """,
-            {"sec": section_id},
             commit=False,
         )
 
@@ -808,6 +778,9 @@ def render_registration_panels(
     f_ids = _f_grade_course_ids(student_id)
     p_ids = _passed_course_ids(student_id)
 
+    # NEW: Keep track of enrolled course IDs
+    enrolled_course_ids = set()
+
     # ── 1. CURRENT ENROLLMENTS (Always visible at the top) ────────────────────
     with st.expander("✅ Current Enrollments", expanded=True):
         st.caption("Courses you are currently enrolled in this semester. You can drop them here.")
@@ -842,6 +815,9 @@ def render_registration_panels(
             )
 
             if enrolled_rows:
+                # Add the course_id of every enrolled class to our tracker
+                enrolled_course_ids = {r["course_id"] for r in enrolled_rows}
+                
                 _panel_header()
                 for row in enrolled_rows:
                     _render_section_row(
@@ -856,19 +832,19 @@ def render_registration_panels(
 
     st.write("") # Adding a little spacing
     st.markdown("### 📖 Course Catalog")
-    
+
     # ── CUSTOM CSS FOR TAB STYLING ────────────────────────────────────────────
     st.markdown(
         """
         <style>
         /* 1. Increases the horizontal gap between tabs */
         div[data-baseweb="tab-list"] {
-            gap: 40px; 
+            gap: 40px;
         }
 
         /* 2. Increases the font size of the tab text */
         button[data-baseweb="tab"] p {
-            font-size: 18px !important;  
+            font-size: 18px !important;
             font-weight: 600 !important; 
         }
         </style>
@@ -876,7 +852,7 @@ def render_registration_panels(
         unsafe_allow_html=True
     )
 
-    # ── 2. THE TABBED MENU (Replaces Expanders A, B, and C) ───────────────────
+    # ── 2. THE TABBED MENU ────────────────────────────────────────────────────
     tab_general, tab_retake, tab_f_grade = st.tabs([
         "📋 Offered Courses ", 
         "🔁 Retakable Courses ", 
@@ -893,7 +869,8 @@ def render_registration_panels(
         for row in all_rows:
             cid = row["course_id"]
 
-            if row["section_id"] in enrolled:
+            # FIX: Check if they are enrolled in the COURSE, not the section
+            if cid in enrolled_course_ids:
                 continue
             if cid in f_ids:
                 continue
@@ -909,15 +886,7 @@ def render_registration_panels(
         else:
             _panel_header()
             for row in general_rows:
-                _render_section_row(
-                    row,
-                    enrolled,
-                    student_id,
-                    actor_id,
-                    acting_role,
-                    drop_deadline,
-                    "panelC",
-                )
+                _render_section_row(row, enrolled, student_id, actor_id, acting_role, drop_deadline, "panelC")
 
     # --- TAB 2: Retakable Courses ---
     with tab_retake:
@@ -927,22 +896,16 @@ def render_registration_panels(
             st.info("No retakable courses found.")
         else:
             retake_rows = _sections_for_courses(p_ids, semester_id)
-            retake_rows = [r for r in retake_rows if r["section_id"] not in enrolled]
+            
+            # FIX: Filter by course_id instead of section_id
+            retake_rows = [r for r in retake_rows if r["course_id"] not in enrolled_course_ids]
 
             if not retake_rows:
                 st.info("Your previously passed courses are not available or you are already enrolled.")
             else:
                 _panel_header()
                 for row in retake_rows:
-                    _render_section_row(
-                        row,
-                        enrolled,
-                        student_id,
-                        actor_id,
-                        acting_role,
-                        drop_deadline,
-                        "panelB",
-                    )
+                    _render_section_row(row, enrolled, student_id, actor_id, acting_role, drop_deadline, "panelB")
 
     # --- TAB 3: F Grade Courses ---
     with tab_f_grade:
@@ -952,22 +915,16 @@ def render_registration_panels(
             st.success("🎉 Excellent! You have no F grade courses to clear.")
         else:
             rows = _sections_for_courses(f_ids, semester_id)
-            rows = [r for r in rows if r["section_id"] not in enrolled]
+            
+            # FIX: Filter by course_id instead of section_id
+            rows = [r for r in rows if r["course_id"] not in enrolled_course_ids]
 
             if not rows:
                 st.info("Your F grade courses are not offered this term or you are already enrolled.")
             else:
                 _panel_header()
                 for row in rows:
-                    _render_section_row(
-                        row,
-                        enrolled,
-                        student_id,
-                        actor_id,
-                        acting_role,
-                        drop_deadline,
-                        "panelA",
-                    )
+                    _render_section_row(row, enrolled, student_id, actor_id, acting_role, drop_deadline, "panelA")
 
     # ── 3. FACULTY CONTROLS ───────────────────────────────────────────────────
     if acting_role == "FACULTY":
