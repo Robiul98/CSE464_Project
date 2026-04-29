@@ -432,23 +432,24 @@ ORDER BY
 -- Expected: 30 rows, one per enrollment, each showing the derived seat change.
 -- -----------------------------------------------------------------------------
 SELECT
-    pl.log_id                                               AS provenance_log_id,
+    pl.log_id                                           AS provenance_log_id,
     pl.request_id,
-    pl.users_user_id                                        AS student_id,
-    pl.how_provenance                                       AS step_1_derivation,
-    pl.operation_type                                       AS step_1_operation,
-    TO_CHAR(pl.event_time, 'YYYY-MM-DD HH24:MI:SS')        AS step_1_time,
-    ssh.seat_log_id                                         AS seat_history_id,
+    pl.users_user_id                                    AS student_id,
+    pl.how_provenance                                   AS step_1_derivation,
+    pl.operation_type                                   AS step_1_operation,
+    TO_CHAR(pl.event_time, 'YYYY-MM-DD HH24:MI:SS')     AS step_1_time,
+    ssh.seat_log_id                                     AS seat_history_id,
     ssh.sections_id,
     ssh.old_available_seats,
     ssh.new_available_seats,
-    ssh.change_reason                                       AS step_2_derivation,
-    TO_CHAR(ssh.changed_at, 'YYYY-MM-DD HH24:MI:SS')       AS step_2_time
+    ssh.change_reason                                   AS step_2_derivation,
+    TO_CHAR(ssh.changed_at, 'YYYY-MM-DD HH24:MI:SS')    AS step_2_time
 FROM
     provenance_log pl
 JOIN
     section_seat_history ssh
-    ON  ssh.sections_id = TO_NUMBER(pl.row_pk)
+    ON pl.row_pk = TO_CHAR(ssh.sections_id) 
+    AND pl.source_table = 'course_sections'
     AND ssh.change_reason = 'Trigger: seat change'
 ORDER BY
     pl.request_id ASC;
