@@ -786,7 +786,7 @@ def render_registration_panels(
     enrolled_course_ids = set()
 
     # ── 1. CURRENT ENROLLMENTS (Always visible at the top) ────────────────────
-    with st.expander("✅ Current Enrollments", expanded=True):
+    with st.expander("📝 Current Enrollments", expanded=True):
         st.caption("Courses you are currently enrolled in this semester. You can drop them here.")
 
         if not enrolled:
@@ -937,6 +937,127 @@ def render_registration_panels(
             _render_section_change(student_id, actor_id, semester_id, enrolled)
 
 
+# def _render_section_change(student_id: str, actor_id: str,
+#                            semester_id: int, enrolled_sections: set):
+#     """Faculty-only: move student from one section to another section of the same course."""
+
+#     st.caption("Move student from one section to another section of the same course.")
+
+#     if not enrolled_sections:
+#         st.info("Student has no current enrollments to change.")
+#         return
+
+#     enrolled_rows = fetch_all(
+#         """
+#         SELECT e.section_id,
+#                c.course_id,
+#                c.course_code,
+#                c.course_title,
+#                cs.section_name AS current_section
+#         FROM   enrollments e
+#         JOIN   course_sections cs ON e.section_id = cs.section_id
+#         JOIN   course_offerings co ON cs.offering_id = co.offering_id
+#         JOIN   courses c ON co.course_id = c.course_id
+#         WHERE  e.students_id = :sid
+#           AND  e.enrollment_status = 'ENROLLED'
+#           AND  co.semesters_id = :sem
+#         ORDER  BY c.course_code, cs.section_name
+#         """,
+#         {"sid": student_id, "sem": semester_id},
+#     )
+
+#     if not enrolled_rows:
+#         st.info("No current enrollments found.")
+#         return
+
+#     course_options = {
+#         f"{r['course_code']} — {r['course_title']} (Sec: {r['current_section']})": r
+#         for r in enrolled_rows
+#     }
+
+#     selected_label = st.selectbox(
+#         "Select current enrollment",
+#         list(course_options.keys()),
+#         key="sc_course_select",
+#     )
+#     selected = course_options[selected_label]
+
+#     other_sections = fetch_all(
+#         """
+#         SELECT cs.section_id,
+#                cs.section_name,
+#                cs.available_seats,
+#                cs.section_status,
+#                f.faculty_name,
+#                cs.room_no
+#         FROM   course_sections cs
+#         JOIN   course_offerings co ON cs.offering_id = co.offering_id
+#         LEFT   JOIN faculty f ON cs.faculty_id = f.user_id
+#         WHERE  co.course_id = :cid
+#           AND  co.semesters_id = :sem
+#           AND  cs.section_id != :cur_sec
+#           AND  cs.section_status IN ('OPEN', 'FULL')
+#         ORDER  BY cs.section_name
+#         """,
+#         {
+#             "cid": selected["course_id"],
+#             "sem": semester_id,
+#             "cur_sec": selected["section_id"],
+#         },
+#     )
+
+#     if not other_sections:
+#         st.warning("No other open sections available for this course.")
+#         return
+
+#     sec_options = {
+#         f"Section {r['section_name']} — {r['faculty_name'] or 'N/A'} — Seats: {r['available_seats']}": r
+#         for r in other_sections
+#     }
+
+#     new_sec_label = st.selectbox(
+#         "Move to section",
+#         list(sec_options.keys()),
+#         key="sc_new_sec",
+#     )
+#     new_sec = sec_options[new_sec_label]
+
+#     if new_sec["section_status"] == "FULL" or new_sec["available_seats"] <= 0:
+#         st.error("Selected section is full.")
+#         return
+
+#     if st.button("Confirm Section Change", type="primary", key="sc_confirm"):
+#         dropped = _do_drop(
+#             student_id,
+#             selected["section_id"],
+#             actor_id,
+#             "FACULTY",
+#             selected["course_code"],
+#             selected["current_section"],
+#             "Section change",
+#         )
+
+#         if not dropped:
+#             st.error("Section change failed during drop.")
+#             return
+
+#         enrolled = _do_enroll(
+#             student_id,
+#             new_sec["section_id"],
+#             actor_id,
+#             "FACULTY",
+#             selected["course_code"],
+#             new_sec["section_name"],
+#         )
+
+#         if not enrolled:
+#             st.error("Old section was dropped, but new section could not be added. Please add manually.")
+#             return
+
+#         st.toast(f"Section changed to {new_sec['section_name']}", icon="✅")
+#         st.rerun()
+
+
 def _render_section_change(student_id: str, actor_id: str,
                            semester_id: int, enrolled_sections: set):
     """Faculty-only: move student from one section to another section of the same course."""
@@ -1022,11 +1143,50 @@ def _render_section_change(student_id: str, actor_id: str,
     )
     new_sec = sec_options[new_sec_label]
 
+    # Pre-validation 1: Seat Availability
     if new_sec["section_status"] == "FULL" or new_sec["available_seats"] <= 0:
         st.error("Selected section is full.")
         return
 
     if st.button("Confirm Section Change", type="primary", key="sc_confirm"):
+        
+        # --- PRE-VALIDATION 2: Schedule Conflict Check ---
+        # We must verify the new section doesn't clash with their other classes, 
+        # specifically IGNORING the section they are moving out of!
+        conflict = fetch_one(
+            """
+            SELECT 1
+            FROM   section_schedule new_s
+            JOIN   course_sections new_cs ON new_s.section_id = new_cs.section_id
+            JOIN   course_offerings new_co ON new_cs.offering_id = new_co.offering_id
+            WHERE  new_s.section_id = :new_sec
+              AND  EXISTS (
+                    SELECT 1
+                    FROM   enrollments e
+                    JOIN   course_sections old_cs ON e.section_id = old_cs.section_id
+                    JOIN   course_offerings old_co ON old_cs.offering_id = old_co.offering_id
+                    JOIN   section_schedule old_s ON old_s.section_id = e.section_id
+                    WHERE  e.students_id = :sid
+                      AND  e.enrollment_status = 'ENROLLED'
+                      AND  e.section_id != :old_sec  -- 👈 CRITICAL: Ignore the current section!
+                      AND  old_co.semesters_id = new_co.semesters_id
+                      AND  old_s.day_of_week = new_s.day_of_week
+                      AND  TO_CHAR(new_s.start_time, 'HH24:MI') < TO_CHAR(old_s.end_time, 'HH24:MI')
+                      AND  TO_CHAR(new_s.end_time, 'HH24:MI') > TO_CHAR(old_s.start_time, 'HH24:MI')
+              )
+            """,
+            {
+                "new_sec": new_sec["section_id"],
+                "sid": student_id,
+                "old_sec": selected["section_id"]
+            }
+        )
+
+        if conflict:
+            st.error("⚠️ Schedule conflict: The new section overlaps with another enrolled course.")
+            return
+
+        # --- STEP 1: Execute the Drop ---
         dropped = _do_drop(
             student_id,
             selected["section_id"],
@@ -1038,9 +1198,10 @@ def _render_section_change(student_id: str, actor_id: str,
         )
 
         if not dropped:
-            st.error("Section change failed during drop.")
+            st.error("Section change failed during drop. Your current enrollment was not changed.")
             return
 
+        # --- STEP 2: Execute the Enroll ---
         enrolled = _do_enroll(
             student_id,
             new_sec["section_id"],
@@ -1050,9 +1211,25 @@ def _render_section_change(student_id: str, actor_id: str,
             new_sec["section_name"],
         )
 
+        # --- STEP 3: The Safety Rollback ---
         if not enrolled:
-            st.error("Old section was dropped, but new section could not be added. Please add manually.")
+            st.warning("⚠️ New section enrollment failed. Attempting to revert to original section...")
+            
+            # Put them right back into the section we just dropped!
+            recovered = _do_enroll(
+                student_id,
+                selected["section_id"],
+                actor_id,
+                "FACULTY",
+                selected["course_code"],
+                selected["current_section"]
+            )
+            
+            if recovered:
+                st.info("🔄 You have been safely placed back in your original section.")
+            else:
+                st.error("🚨 CRITICAL ERROR: Failed to revert to original section. Please contact Database Admin.")
             return
 
-        st.toast(f"Section changed to {new_sec['section_name']}", icon="✅")
+        st.toast(f"✅ Section successfully changed to {new_sec['section_name']}")
         st.rerun()
