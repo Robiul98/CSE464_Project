@@ -244,10 +244,14 @@ def _has_schedule_conflict(student_id: str, new_section_id: int):
 
                 WHERE  e.students_id = :sid
                   AND  e.enrollment_status = 'ENROLLED'
+                  AND  e.section_id != :new_sec   
                   AND  old_co.semesters_id = new_co.semesters_id
                   AND  old_s.day_of_week = new_s.day_of_week
                   AND  new_s.start_time < old_s.end_time
                   AND  new_s.end_time > old_s.start_time
+                  
+                  AND  TO_CHAR(new_s.start_time, 'HH24:MI') < TO_CHAR(old_s.end_time, 'HH24:MI')
+                  AND  TO_CHAR(new_s.end_time, 'HH24:MI') > TO_CHAR(old_s.start_time, 'HH24:MI')
           )
         """,
         {"sid": student_id, "new_sec": new_section_id},
